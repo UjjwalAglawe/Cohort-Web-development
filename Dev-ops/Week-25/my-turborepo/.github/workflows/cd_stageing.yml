@@ -1,0 +1,41 @@
+name: Deploy to staging
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  redeploy_everything:
+    runs-on: ubuntu-latest
+    name: Deploying everything to the staging cluster
+    steps:
+      - run: |
+          # Save the private key securely
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/ssh_key
+          chmod 600 ~/ssh_key
+
+          # Connect via SSH and deploy
+          ssh -o ServerAliveInterval=30 -o StrictHostKeyChecking=no -i ~/ssh_key ubuntu@52.66.81.169 << 'EOF'
+            echo "Checking available directories..."
+            ls -la
+
+            # Navigate to the project
+            cd /home/ubuntu/Turborepo-devops || exit 1
+            git pull origin main
+
+            # Load NVM
+            export NVM_DIR="/home/ubuntu/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            nvm use 22 || nvm install 22
+
+            # Install dependencies
+            npm install -g pnpm pm2
+            pnpm install
+
+            # Run the build
+            pnpm run build || { echo "Build failed"; exit 1; }
+
+            # Restart all PM2 processes in the background
+            nohup pm2 restart all > /dev/null 2>&1 &
+
+            echo "Deployment completed successfully!"
+          EOF
